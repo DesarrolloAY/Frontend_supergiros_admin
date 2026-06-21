@@ -1,10 +1,10 @@
 import * as grpcWeb from 'grpc-web';
-import '../protos/Protos/Transaction_pb.js'; 
-import '../protos/Protos/Customer_pb.js';
+import '../Protos/Protos/Transaction_pb.js';
+import '../Protos/Protos/Customer_pb.js';
 
-const GRPC_HOST = 'http://localhost:5240'; 
+const GRPC_HOST = 'http://localhost:5220'; 
 // 🔥 IMPORTANTE: Pega aquí tu token válido actual (el que obtuviste de Swagger)
-const AUTH_TOKEN = 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1lIjoiYWRtaW4iLCJodHRwOi8vc2NoZW1hcy5taWNyb3NvZnQuY29tL3dzLzIwMDgvMDYvaWRlbnRpdHkvY2xhaW1zL3JvbGUiOiJBZG1pbiIsImp0aSI6IjA4MzZiYzNjLTc2ZmQtNDBhMS05ZjViLTY0NjkzMmQ4ZWU0OCIsImV4cCI6MTc4MTgxNjI2OSwiaXNzIjoiU3VwZXJHaXJvcy5UcmFuc2Zlci5BUEkiLCJhdWQiOiJTdXBlckdpcm9zLlRyYW5zZmVyLlVzZXJzIn0.Opw74kWshRYtPvFiiiSSGRGkszwSPOtAM6_1AyyntJA'; 
+const AUTH_TOKEN = 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1lIjoiYWRtaW4iLCJodHRwOi8vc2NoZW1hcy5taWNyb3NvZnQuY29tL3dzLzIwMDgvMDYvaWRlbnRpdHkvY2xhaW1zL3JvbGUiOiJBZG1pbiIsImp0aSI6Ijg4ODA4M2VlLTU1MGMtNGFhNy1iMjdmLTBhN2FmN2IzZGU0MiIsImV4cCI6MTc4MTk0ODU3NSwiaXNzIjoiU3VwZXJHaXJvcy5UcmFuc2Zlci5BUEkiLCJhdWQiOiJTdXBlckdpcm9zLlRyYW5zZmVyLlVzZXJzIn0.Wb9c5yXTXB-hN-_t9Ht9Q41Ywj7qFPnDEiSAAkm8UO0'; 
 
 const getProtoClass = (fullClassName) => {
     if (!window.proto || !window.proto.Protos) return null;
