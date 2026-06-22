@@ -5,6 +5,6 @@ import commonjs from 'vite-plugin-commonjs' // 🔴 Importamos el plugin
 export default defineConfig({
   plugins: [
     react(), 
-    commonjs() // 🔴 Lo activamos aquí
+    commonjs() // 🔴 Lo activamos aquíiiiiiiiiiiiiiiiiii
   ],
 })
