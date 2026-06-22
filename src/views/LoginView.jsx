@@ -13,31 +13,41 @@ export const LoginView = () => {
     if (value.length <= 8) setDni(value);
   };
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
 
     if (dni.length !== 8) {
-      return Swal.fire({
-        icon: 'warning',
-        title: 'Validación',
-        text: 'El DNI debe tener exactamente 8 dígitos.',
-        confirmButtonColor: '#1261A6'
-      });
+      return Swal.fire({ icon: 'warning', title: 'Validación', text: 'El DNI debe tener exactamente 8 dígitos.' });
     }
-
     if (password.trim() === '') {
-      return Swal.fire({
-        icon: 'warning',
-        title: 'Validación',
-        text: 'La contraseña es obligatoria.',
-        confirmButtonColor: '#1261A6'
-      });
+      return Swal.fire({ icon: 'warning', title: 'Validación', text: 'La contraseña es obligatoria.' });
     }
 
-    // Simulador de autenticación
-    // Simulador de autenticación
-    sessionStorage.setItem('sg_token', 'token-seguro-simulado');
-    navigate('/emision');
+    try {
+      // 1. Llamamos a tu controlador REST en C#
+      const response = await fetch('http://localhost:5220/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ Username: dni, Password: password })
+      });
+
+      const data = await response.json();
+
+      if (data.isSuccess) {
+        // 2. Guardamos el token real de forma invisible
+        sessionStorage.setItem('sg_token', data.token);
+        
+        // OPCIONAL: Decodificar el token aquí para saber el rol y guardarlo
+        // const payload = JSON.parse(atob(data.token.split('.')[1]));
+        // sessionStorage.setItem('sg_role', payload.role);
+
+        navigate('/emision');
+      } else {
+        Swal.fire({ icon: 'error', title: 'Acceso Denegado', text: data.message });
+      }
+    } catch (error) {
+      Swal.fire({ icon: 'error', title: 'Error de Red', text: 'No se pudo conectar con el servidor de autenticación.' });
+    }
   };
 
   return (

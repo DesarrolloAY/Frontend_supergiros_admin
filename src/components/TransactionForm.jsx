@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import HistorialGiros from './HistorialGiros'; // Ajusta la ruta si es necesario
 import { useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
 import { executeGrpcCall, transactionClient } from '../services/grpcClient';
@@ -20,6 +21,21 @@ export const TransactionForm = () => {
   const [modalStep, setModalStep] = useState(1);
   const [paymentMethod, setPaymentMethod] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [vistaActual, setVistaActual] = useState('emision'); // 'emision' o 'historial'
+  // Extraemos el rol directamente del Token guardado
+  const getUserRole = () => {
+    const token = sessionStorage.getItem('sg_token');
+    if (!token) return null;
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      // .NET usa este esquema largo por defecto para los roles
+      return payload.role || payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'];
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const userRole = getUserRole();
 
   const handleNumericInput = (e, field, maxLength) => {
     const value = e.target.value.replace(/[^0-9]/g, '');
@@ -64,13 +80,30 @@ export const TransactionForm = () => {
 
     try {
       const request = new TransactionPb.CreateTransactionRequest();
-      
-      request.setId(Date.now().toString()); 
-      request.setMonto(montoValido);
-      request.setSede(formData.sedeDestino);
-      request.setTipo("Emisión de Giro");
-      request.setFechaderealizacion(new Date().toISOString());
 
+      // 1. DNI (AccountId) -> Espera un número entero
+      request.setAccountid(parseInt(formData.dniRemitente, 10));
+
+      // 2. Monto -> Espera un valor decimal (double)
+      request.setMonto(montoValido);
+
+      // 3. Sede -> Espera un texto (string)
+      request.setSede(formData.sedeDestino);
+
+      // 4. TipoMovimiento -> Espera un valor de Enum (1 = GIRO)
+      request.setTipomovimiento(1); 
+
+      // 5. Moneda y Descripción -> Textos estándar para SQL
+      request.setMoneda("PEN");
+      request.setDescripcion("Pago vía: " + getPaymentChannelName());
+
+      // 6. FechaRealizacion -> Requiere el formato especial de Google Protobuf
+      // En el entorno del navegador, instanciamos el Timestamp así:
+      const timestamp = new window.proto.google.protobuf.Timestamp();
+      timestamp.fromDate(new Date());
+      request.setFecharealizacion(timestamp);
+
+      // 🚀 Ejecutamos la llamada segura
       await executeGrpcCall(transactionClient.createTransaction, request);
 
       setIsModalOpen(false);
@@ -128,11 +161,27 @@ export const TransactionForm = () => {
         
         <nav className="flex-1 px-4 py-8 space-y-2">
           <p className="px-4 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Operaciones</p>
-          <button className="w-full flex items-center gap-4 bg-blue-600/10 text-blue-500 px-4 py-3.5 rounded-2xl font-semibold border border-blue-500/20 shadow-inner">
+          <button 
+            onClick={() => setVistaActual('emision')}
+            className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl font-semibold transition-all ${
+              vistaActual === 'emision' 
+              ? 'bg-blue-600/10 text-blue-500 border border-blue-500/20 shadow-inner' 
+              : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200 border border-transparent'
+            }`}
+          >
             <i className="fa-solid fa-money-bill-wave w-5 text-center"></i>
             Emisión de Giros
           </button>
-          <button className="w-full flex items-center gap-4 hover:bg-slate-800 text-slate-400 hover:text-slate-200 px-4 py-3.5 rounded-2xl font-medium transition-all">
+
+          {/* Botón de Historial */}
+          <button 
+            onClick={() => setVistaActual('historial')}
+            className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl font-semibold transition-all ${
+              vistaActual === 'historial' 
+              ? 'bg-blue-600/10 text-blue-500 border border-blue-500/20 shadow-inner' 
+              : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200 border border-transparent'
+            }`}
+          >
             <i className="fa-solid fa-clock-rotate-left w-5 text-center"></i>
             Historial de Giros
           </button>
@@ -170,95 +219,109 @@ export const TransactionForm = () => {
         </header>
 
         <div className="flex-1 overflow-y-auto p-10 pb-32">
-          <form onSubmit={openConfirmationFlow} className="max-w-6xl mx-auto space-y-8">
-            
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-              {/* Remitente */}
-              <div className="bg-white p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100">
-                <div className="flex items-center gap-4 mb-8">
-                  <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center text-xl">
-                    <i className="fa-solid fa-user-tie"></i>
+          {/* Aquí está la magia de la vista */}
+          {vistaActual === 'emision' ? (
+            <form onSubmit={openConfirmationFlow} className="max-w-6xl mx-auto space-y-8">
+              
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+                {/* Remitente */}
+                <div className="bg-white p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100">
+                  <div className="flex items-center gap-4 mb-8">
+                    <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center text-xl">
+                      <i className="fa-solid fa-user-tie"></i>
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-800">Datos del Remitente</h3>
+                      <p className="text-sm text-slate-500">Información de quien envía</p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-lg font-bold text-slate-800">Datos del Remitente</h3>
-                    <p className="text-sm text-slate-500">Información de quien envía</p>
+                  <div className="space-y-6">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">DNI Remitente</label>
+                      <input type="text" name="dniRemitente" value={formData.dniRemitente} onChange={(e) => handleNumericInput(e, 'dniRemitente', 8)} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:bg-white transition-all outline-none font-mono text-lg tracking-widest text-slate-700" placeholder="12345678" required />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Nombres Completos</label>
+                      <input type="text" name="nombresRemitente" value={formData.nombresRemitente} onChange={handleChange} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:bg-white transition-all outline-none text-slate-700 font-medium" placeholder="Ej. Juan Pérez" required />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Celular</label>
+                      <input type="text" name="celularRemitente" value={formData.celularRemitente} onChange={(e) => handleNumericInput(e, 'celularRemitente', 9)} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:bg-white transition-all outline-none font-mono text-lg tracking-widest text-slate-700" placeholder="987654321" required />
+                    </div>
                   </div>
                 </div>
-                <div className="space-y-6">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">DNI Remitente</label>
-                    <input type="text" name="dniRemitente" value={formData.dniRemitente} onChange={(e) => handleNumericInput(e, 'dniRemitente', 8)} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:bg-white transition-all outline-none font-mono text-lg tracking-widest text-slate-700" placeholder="12345678" required />
+
+                {/* Destinatario */}
+                <div className="bg-white p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100">
+                  <div className="flex items-center gap-4 mb-8">
+                    <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center text-xl">
+                      <i className="fa-solid fa-location-dot"></i>
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-800">Destino del Giro</h3>
+                      <p className="text-sm text-slate-500">Información de quien recibe</p>
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Nombres Completos</label>
-                    <input type="text" name="nombresRemitente" value={formData.nombresRemitente} onChange={handleChange} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:bg-white transition-all outline-none text-slate-700 font-medium" placeholder="Ej. Juan Pérez" required />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Celular</label>
-                    <input type="text" name="celularRemitente" value={formData.celularRemitente} onChange={(e) => handleNumericInput(e, 'celularRemitente', 9)} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:bg-white transition-all outline-none font-mono text-lg tracking-widest text-slate-700" placeholder="987654321" required />
+                  <div className="space-y-6">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">DNI Beneficiario</label>
+                      <input type="text" name="dniDestinatario" value={formData.dniDestinatario} onChange={(e) => handleNumericInput(e, 'dniDestinatario', 8)} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 focus:bg-white transition-all outline-none font-mono text-lg tracking-widest text-slate-700" placeholder="87654321" required />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Nombres Beneficiario</label>
+                      <input type="text" name="nombresDestinatario" value={formData.nombresDestinatario} onChange={handleChange} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 focus:bg-white transition-all outline-none text-slate-700 font-medium" placeholder="Ej. María López" required />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Agencia de Retiro</label>
+                      <select name="sedeDestino" value={formData.sedeDestino} onChange={handleChange} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 focus:bg-white transition-all outline-none text-slate-700 font-medium cursor-pointer appearance-none">
+                        <option value="Sede Central">Sede Central - Cusco</option>
+                        <option value="Sucursal Norte">Sucursal Norte</option>
+                        <option value="Sucursal Sur">Sucursal Sur</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* Destinatario */}
-              <div className="bg-white p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100">
-                <div className="flex items-center gap-4 mb-8">
-                  <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center text-xl">
-                    <i className="fa-solid fa-location-dot"></i>
-                  </div>
+              {/* Barra Inferior Fija de Totales */}
+              <div className="bg-white p-6 md:p-8 rounded-3xl shadow-xl border border-slate-100 flex flex-col lg:flex-row items-center justify-between gap-8 fixed bottom-6 left-[20rem] right-10 z-10">
+                <div className="flex flex-wrap items-center gap-8 md:gap-16 w-full lg:w-auto">
                   <div>
-                    <h3 className="text-lg font-bold text-slate-800">Destino del Giro</h3>
-                    <p className="text-sm text-slate-500">Información de quien recibe</p>
+                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Importe a Enviar</label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xl">S/</span>
+                      <input type="text" name="monto" value={formData.monto} onChange={handleCurrencyInput} className="w-40 pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-2xl font-black text-slate-800 outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all" placeholder="0.00" required />
+                    </div>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Comisión (5%)</span>
+                    <span className="text-xl font-bold text-slate-600">S/ {comision.toFixed(2)}</span>
+                  </div>
+                  <div className="flex flex-col pl-6 border-l-2 border-slate-100">
+                    <span className="text-xs font-bold text-emerald-500 uppercase tracking-wider mb-1">Total a Pagar</span>
+                    <span className="text-4xl font-black text-slate-800 tracking-tight">S/ {total.toFixed(2)}</span>
                   </div>
                 </div>
-                <div className="space-y-6">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">DNI Beneficiario</label>
-                    <input type="text" name="dniDestinatario" value={formData.dniDestinatario} onChange={(e) => handleNumericInput(e, 'dniDestinatario', 8)} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 focus:bg-white transition-all outline-none font-mono text-lg tracking-widest text-slate-700" placeholder="87654321" required />
+
+                {userRole === 'Admin' ? (
+                  <button type="submit" className="w-full lg:w-auto px-10 py-5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-2xl shadow-lg shadow-blue-600/30 transition-all transform hover:-translate-y-0.5 text-lg flex items-center justify-center gap-3">
+                    <i className="fa-solid fa-paper-plane"></i>
+                    Registrar Transacción
+                  </button>
+                ) : (
+                  <div className="w-full lg:w-auto px-8 py-4 bg-amber-50 border border-amber-200 text-amber-700 font-bold rounded-2xl flex items-center justify-center gap-3 shadow-inner">
+                    <i className="fa-solid fa-lock"></i>
+                    Modo Lectura (Sin Privilegios)
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Nombres Beneficiario</label>
-                    <input type="text" name="nombresDestinatario" value={formData.nombresDestinatario} onChange={handleChange} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 focus:bg-white transition-all outline-none text-slate-700 font-medium" placeholder="Ej. María López" required />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Agencia de Retiro</label>
-                    <select name="sedeDestino" value={formData.sedeDestino} onChange={handleChange} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 focus:bg-white transition-all outline-none text-slate-700 font-medium cursor-pointer appearance-none">
-                      <option value="Sede Central">Sede Central - Cusco</option>
-                      <option value="Sucursal Norte">Sucursal Norte</option>
-                      <option value="Sucursal Sur">Sucursal Sur</option>
-                    </select>
-                  </div>
-                </div>
+                )}
               </div>
+
+            </form>
+          ) : (
+            <div className="max-w-6xl mx-auto">
+              <HistorialGiros />
             </div>
-
-            {/* Barra Inferior Fija de Totales */}
-            <div className="bg-white p-6 md:p-8 rounded-3xl shadow-xl border border-slate-100 flex flex-col lg:flex-row items-center justify-between gap-8 fixed bottom-6 left-[20rem] right-10 z-10">
-              <div className="flex flex-wrap items-center gap-8 md:gap-16 w-full lg:w-auto">
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Importe a Enviar</label>
-                  <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xl">S/</span>
-                    <input type="text" name="monto" value={formData.monto} onChange={handleCurrencyInput} className="w-40 pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-2xl font-black text-slate-800 outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all" placeholder="0.00" required />
-                  </div>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Comisión (5%)</span>
-                  <span className="text-xl font-bold text-slate-600">S/ {comision.toFixed(2)}</span>
-                </div>
-                <div className="flex flex-col pl-6 border-l-2 border-slate-100">
-                  <span className="text-xs font-bold text-emerald-500 uppercase tracking-wider mb-1">Total a Pagar</span>
-                  <span className="text-4xl font-black text-slate-800 tracking-tight">S/ {total.toFixed(2)}</span>
-                </div>
-              </div>
-
-              <button type="submit" className="w-full lg:w-auto px-10 py-5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-2xl shadow-lg shadow-blue-600/30 transition-all transform hover:-translate-y-0.5 text-lg flex items-center justify-center gap-3">
-                <i className="fa-solid fa-paper-plane"></i>
-                Registrar Transacción
-              </button>
-            </div>
-
-          </form>
+          )}
         </div>
       </main>
 
