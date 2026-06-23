@@ -9,10 +9,11 @@ export default defineConfig({
     commonjs() // Convierte los 'require' de gRPC para que el navegador los entienda
   ],
   server: {
-    // 🔥 EL PROXY DE NIUBIZ QUE HABÍAMOS CREADO (NO LO BORRES)
     proxy: {
       '/niubiz-api': {
-        target: 'https://apitestenv.vnforapps.com',
+        // 🔥 CAMBIO CRÍTICO: Apuntamos al Sandbox oficial de Niubiz 
+        // para que coincida con el entorno del script de pago.
+        target: 'https://apisandbox.vnforappstest.com',
         changeOrigin: true,
         secure: false,
         rewrite: (path) => path.replace(/^\/niubiz-api/, '')

@@ -11,15 +11,10 @@ import "../Protos/Transaction_pb.js";
 // CONTROL GLOBAL gRPC
 const TransactionPb = window.proto.Protos || window.proto;
 
-// === SOLUCIÓN AL LINTER: Función impura fuera del ciclo de vida de React ===
+// === Función impura fuera del ciclo de vida de React ===
 const generateOrderNumber = () => {
   return Math.floor(Math.random() * 1000000).toString();
 };
-
-/* IMPORTANTE PARA TU COMPAÑERO: 
-  Asegúrate de que en el archivo vite.config.js esté configurado el proxy '/niubiz-api' 
-  apuntando a 'https://apitestenv.vnforapps.com' para evitar errores de CORS.
-*/
 
 export const TransactionForm = () => {
   const navigate = useNavigate();
@@ -34,9 +29,8 @@ export const TransactionForm = () => {
   const [modalStep, setModalStep] = useState(1);
   const [paymentMethod, setPaymentMethod] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [vistaActual, setVistaActual] = useState('emision'); // 'emision' o 'historial'
+  const [vistaActual, setVistaActual] = useState('emision'); 
   
-  // Extraemos el rol directamente del Token guardado
   const getUserRole = () => {
     const token = sessionStorage.getItem('sg_token');
     if (!token) return null;
@@ -83,7 +77,7 @@ export const TransactionForm = () => {
       return Swal.fire({ icon: 'warning', title: 'Monto inválido', text: 'El monto debe ser mayor a S/ 0.00', confirmButtonColor: '#2563eb' });
     }
 
-    setPaymentMethod('cash'); // Por defecto seleccionado efectivo
+    setPaymentMethod('cash');
     setModalStep(1);
     setIsModalOpen(true);
   };
@@ -92,6 +86,7 @@ export const TransactionForm = () => {
   // LÓGICA DE INFRAESTRUCTURA (gRPC Backend)
   // ------------------------------------------------------------------
   const executeBackendTransaction = async (opNiubiz = null) => {
+    console.log("🟢 FASE 4: Ejecutando gRPC hacia el backend. OP Niubiz:", opNiubiz);
     try {
       const request = new TransactionPb.CreateTransactionRequest();
 
@@ -101,7 +96,6 @@ export const TransactionForm = () => {
       request.setTipomovimiento(1); 
       request.setMoneda("PEN");
       
-      // Si recibimos un número de operación (viene de Niubiz), lo adjuntamos a la descripción
       const baseDesc = "Pago vía: " + getPaymentChannelName();
       request.setDescripcion(opNiubiz ? `${baseDesc} | OP: ${opNiubiz}` : baseDesc);
 
@@ -110,6 +104,7 @@ export const TransactionForm = () => {
       request.setFecharealizacion(timestamp);
 
       await executeGrpcCall(transactionClient.createTransaction, request);
+      console.log("✅ FASE 4 EXITOSA: gRPC respondió 200 OK");
 
       Swal.fire({
         icon: 'success',
@@ -125,7 +120,7 @@ export const TransactionForm = () => {
       });
 
     } catch (error) {
-      console.error(error);
+      console.error("❌ FASE 4 FALLÓ. Error en gRPC:", error);
       Swal.fire({
         icon: 'error',
         title: 'Error en Infraestructura',
@@ -137,99 +132,107 @@ export const TransactionForm = () => {
   };
 
   // ------------------------------------------------------------------
-  // LÓGICA DE NIUBIZ (Frontend Exclusivo)
+  // LÓGICA DE NIUBIZ CON TRAZABILIDAD (DEBUG)
   // ------------------------------------------------------------------
   const processNiubizPayment = async (montoFinal) => {
     setIsLoading(true);
-    const merchantId = '450201653'; 
-    const userNiubiz = 'integraciones.visanet@necomplus.com';
-    const passwordNiubiz = 'd5e7nk$M';
+    // 🔥 FIX: Credenciales oficiales del Sandbox moderno de Niubiz
+    const merchantId = '456879852'; // Código exclusivo para pruebas en Soles
+    const userNiubiz = 'integraciones@niubiz.com.pe'; 
+    const passwordNiubiz = '_7z3@8fF'; 
     
-    // Llamamos a la función externa para obtener el número aleatorio seguro
     const randomOrderNumber = generateOrderNumber();
 
     try {
-      // 1. Obtener Token de Seguridad (Vía proxy de Vite)
+      console.log("🟢 FASE 1: Solicitando Token de Seguridad...");
       const authString = btoa(`${userNiubiz}:${passwordNiubiz}`);
       const securityRes = await fetch('/niubiz-api/api.security/v1/security', {
         method: 'GET',
-        headers: {
-          'Authorization': `Basic ${authString}`,
-          'Accept': 'text/plain'
-        }
+        headers: { 'Authorization': `Basic ${authString}`, 'Accept': 'text/plain' }
       });
 
-      if (!securityRes.ok) throw new Error('No se pudo conectar con los servidores de Visa (Seguridad).');
+      const securityToken = (await securityRes.text()).trim().replace(/"/g, '');
       
-      const rawToken = await securityRes.text();
-      const securityToken = rawToken.trim().replace(/"/g, '');
-
-      // 2. Obtener Token de Sesión usando el Monto Final
+      console.log("🟢 FASE 2: Creando Sesión...");
+      
+      // 🔥 FIX: Forzamos el monto a float con 2 decimales explícitos
+      const amountFloat = parseFloat(montoFinal);
+      
       const sessionPayload = {
         channel: 'web',
-        amount: parseFloat(montoFinal).toFixed(2), // Obligatorio con 2 decimales
-        currency: 'PEN', // Obligatorio
-        orderNumber: randomOrderNumber, // <--- Usamos la variable constante aquí
+        amount: amountFloat,
         antifraud: {
-          clientIp: '127.0.0.1',
-          merchantDefineData: { MDD4: 'test@supergiros.com', MDD32: formData.dniRemitente }
+          // 🔥 FIX: Simulamos una IP pública peruana. NUNCA envíes 127.0.0.1
+          clientIp: '190.237.10.12', 
+          merchantDefineData: { 
+            MDD4: 'test@supergiros.com', 
+            MDD32: formData.dniRemitente || '12345678' 
+          }
         }
       };
 
       const sessionRes = await fetch(`/niubiz-api/api.ecommerce/v2/ecommerce/token/session/${merchantId}`, {
         method: 'POST',
-        headers: {
-          'Authorization': securityToken,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Authorization': securityToken, 'Content-Type': 'application/json' },
         body: JSON.stringify(sessionPayload)
       });
 
-      if (!sessionRes.ok) throw new Error('No se pudo crear la sesión de pago con Niubiz.');
+      if (!sessionRes.ok) throw new Error(await sessionRes.text());
       const sessionData = await sessionRes.json();
-      const sessionKey = sessionData.sessionKey;
-
-      // 3. Cargar e Inyectar el Formulario Visanet
+      
+      console.log("🟢 FASE 3: Inyectando Modal...");
       const script = document.createElement('script');
-      script.src = 'https://static-qa.niubiz.com.pe/pay-form/v2/js/step1.js';
+      
+      // 🔥 Regresamos a la URL oficial del PDF que SÍ carga
+      script.src = 'https://static-content-qas.vnforapps.com/env/sandbox/js/checkout.js';
       script.async = true;
+
       script.onload = () => {
-        window.VisanetCheckout.configure({
-          sessiontoken: sessionKey,
-          channel: 'web',
-          merchantid: merchantId,
-          purchasenumber: randomOrderNumber, // <--- Usamos la misma variable aquí
-          amount: parseFloat(montoFinal).toFixed(2),
-          expirationminutes: '20',
-          timeouturl: window.location.href, 
-          merchantlogo: 'https://tu-dominio.com/logo-supergiros.png', 
-          formbuttoncolor: '#2563eb',
-          action: window.location.href, 
-          complete: async function(params) {
-            console.log('Pago de Niubiz completado:', params);
-            // Capturamos el número de operación de Niubiz y lo mandamos al backend
-            const numOperacion = params.dataMap?.TRACE_NUMBER || 'OK';
-            await executeBackendTransaction(numOperacion);
-            setIsLoading(false);
-          }
-        });
+        console.log("✅ FASE 3: Script cargado. Configurando VisanetCheckout...");
         
-        window.VisanetCheckout.open();
-        // Cerramos el modal local porque Niubiz abrirá el suyo encima
-        setIsModalOpen(false); 
+        try {
+          if (window.VisanetCheckout) {
+            window.VisanetCheckout.configure({
+              sessiontoken: sessionData.sessionKey,
+              merchantid: merchantId,
+              purchasenumber: randomOrderNumber,
+              amount: amountFloat,
+              channel: 'web',
+              action: 'javascript:void(0);', 
+              timeouturl: window.location.origin, 
+              merchantlogo: 'https://cdn-icons-png.flaticon.com/512/5717/5717515.png', 
+              formbuttoncolor: '#2563eb',
+              
+              complete: async function(params) {
+                console.log('🎉 PAGO COMPLETADO. Params:', params);
+                const numOperacion = params.dataMap?.TRACE_NUMBER || 'OK';
+                await executeBackendTransaction(numOperacion);
+                setIsLoading(false);
+              },
+              error: function(err) {
+                console.error("❌ ERROR DEL MODAL VISA:", err);
+                setIsLoading(false);
+                Swal.fire({ icon: 'error', title: 'Error de SDK', text: 'La pasarela falló internamente.' });
+              }
+            });
+
+            setTimeout(() => {
+              console.log("🟢 Abriendo modal ahora...");
+              window.VisanetCheckout.open();
+              setIsModalOpen(false); 
+            }, 500);
+          }
+        } catch (e) {
+          console.error("❌ ERROR FATAL:", e);
+        }
       };
       
       document.body.appendChild(script);
 
     } catch (error) {
-      console.error(error);
+      console.error("🚨 ERROR:", error);
       setIsLoading(false);
-      Swal.fire({
-        icon: 'error',
-        title: 'Error de Pasarela',
-        text: error.message,
-        confirmButtonColor: '#ef4444'
-      });
+      Swal.fire({ icon: 'error', title: 'Error de Pasarela', text: 'Error en la sesión de pago.' });
     }
   };
 
@@ -240,10 +243,8 @@ export const TransactionForm = () => {
     const montoCalculado = parseFloat(total.toFixed(2));
 
     if (paymentMethod === 'card') {
-      // Flujo Niubiz (Frontend) -> Pasa el monto calculado -> Luego Backend
       await processNiubizPayment(montoCalculado);
     } else {
-      // Flujo Directo Efectivo/Telegram -> Backend Inmediato
       setIsLoading(true);
       await executeBackendTransaction();
       setIsLoading(false);

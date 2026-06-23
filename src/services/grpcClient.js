@@ -1,7 +1,7 @@
-// src/services/grpcClient.js
 import { TransactionsClient } from "../Protos/TransactionServiceClientPb";
 
-const BASE_URL = 'http://127.0.0.1:60558'; // Puerto HTTP actual del túnel
+// 🔥 AQUÍ ESTABA EL ERROR: DEBE SER EL PUERTO gRPC (60559)
+const BASE_URL = 'http://127.0.0.1:60559'; 
 
 export const transactionClient = new TransactionsClient(BASE_URL, null, null);
 
