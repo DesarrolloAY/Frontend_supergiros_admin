@@ -1,4 +1,3 @@
-import React from 'react';
 
 // Recibe los datos de la transacción confirmada como 'props'
 export const VoucherPrint = ({ data }) => {

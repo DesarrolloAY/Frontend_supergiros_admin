@@ -1,12 +1,25 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import HistorialGiros from './HistorialGiros'; // Ajusta la ruta si es necesario
 import { useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
 import { executeGrpcCall, transactionClient } from '../services/grpcClient';
 
-// CONTROL GLOBAL gRPC
+// IMPORTANTE: Asegurar que los tipos comunes también se carguen en el scope ANTES que Transaction_pb.js
+import "../Protos/Common_pb.js"; 
 import "../Protos/Transaction_pb.js";
+
+// CONTROL GLOBAL gRPC
 const TransactionPb = window.proto.Protos || window.proto;
+
+// === SOLUCIÓN AL LINTER: Función impura fuera del ciclo de vida de React ===
+const generateOrderNumber = () => {
+  return Math.floor(Math.random() * 1000000).toString();
+};
+
+/* IMPORTANTE PARA TU COMPAÑERO: 
+  Asegúrate de que en el archivo vite.config.js esté configurado el proxy '/niubiz-api' 
+  apuntando a 'https://apitestenv.vnforapps.com' para evitar errores de CORS.
+*/
 
 export const TransactionForm = () => {
   const navigate = useNavigate();
@@ -22,15 +35,15 @@ export const TransactionForm = () => {
   const [paymentMethod, setPaymentMethod] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [vistaActual, setVistaActual] = useState('emision'); // 'emision' o 'historial'
+  
   // Extraemos el rol directamente del Token guardado
   const getUserRole = () => {
     const token = sessionStorage.getItem('sg_token');
     if (!token) return null;
     try {
       const payload = JSON.parse(atob(token.split('.')[1]));
-      // .NET usa este esquema largo por defecto para los roles
       return payload.role || payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'];
-    } catch (e) {
+    } catch {
       return null;
     }
   };
@@ -75,38 +88,28 @@ export const TransactionForm = () => {
     setIsModalOpen(true);
   };
 
-  const handleFinalConfirm = async () => {
-    setIsLoading(true);
-
+  // ------------------------------------------------------------------
+  // LÓGICA DE INFRAESTRUCTURA (gRPC Backend)
+  // ------------------------------------------------------------------
+  const executeBackendTransaction = async (opNiubiz = null) => {
     try {
       const request = new TransactionPb.CreateTransactionRequest();
 
-      // 1. DNI (AccountId) -> Espera un número entero
       request.setAccountid(parseInt(formData.dniRemitente, 10));
-
-      // 2. Monto -> Espera un valor decimal (double)
       request.setMonto(montoValido);
-
-      // 3. Sede -> Espera un texto (string)
       request.setSede(formData.sedeDestino);
-
-      // 4. TipoMovimiento -> Espera un valor de Enum (1 = GIRO)
       request.setTipomovimiento(1); 
-
-      // 5. Moneda y Descripción -> Textos estándar para SQL
       request.setMoneda("PEN");
-      request.setDescripcion("Pago vía: " + getPaymentChannelName());
+      
+      // Si recibimos un número de operación (viene de Niubiz), lo adjuntamos a la descripción
+      const baseDesc = "Pago vía: " + getPaymentChannelName();
+      request.setDescripcion(opNiubiz ? `${baseDesc} | OP: ${opNiubiz}` : baseDesc);
 
-      // 6. FechaRealizacion -> Requiere el formato especial de Google Protobuf
-      // En el entorno del navegador, instanciamos el Timestamp así:
       const timestamp = new window.proto.google.protobuf.Timestamp();
       timestamp.fromDate(new Date());
       request.setFecharealizacion(timestamp);
 
-      // 🚀 Ejecutamos la llamada segura
       await executeGrpcCall(transactionClient.createTransaction, request);
-
-      setIsModalOpen(false);
 
       Swal.fire({
         icon: 'success',
@@ -130,8 +133,121 @@ export const TransactionForm = () => {
         confirmButtonColor: '#ef4444',
         customClass: { popup: 'rounded-3xl' }
       });
-    } finally {
+    }
+  };
+
+  // ------------------------------------------------------------------
+  // LÓGICA DE NIUBIZ (Frontend Exclusivo)
+  // ------------------------------------------------------------------
+  const processNiubizPayment = async (montoFinal) => {
+    setIsLoading(true);
+    const merchantId = '450201653'; 
+    const userNiubiz = 'integraciones.visanet@necomplus.com';
+    const passwordNiubiz = 'd5e7nk$M';
+    
+    // Llamamos a la función externa para obtener el número aleatorio seguro
+    const randomOrderNumber = generateOrderNumber();
+
+    try {
+      // 1. Obtener Token de Seguridad (Vía proxy de Vite)
+      const authString = btoa(`${userNiubiz}:${passwordNiubiz}`);
+      const securityRes = await fetch('/niubiz-api/api.security/v1/security', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Basic ${authString}`,
+          'Accept': 'text/plain'
+        }
+      });
+
+      if (!securityRes.ok) throw new Error('No se pudo conectar con los servidores de Visa (Seguridad).');
+      
+      const rawToken = await securityRes.text();
+      const securityToken = rawToken.trim().replace(/"/g, '');
+
+      // 2. Obtener Token de Sesión usando el Monto Final
+      const sessionPayload = {
+        channel: 'web',
+        amount: parseFloat(montoFinal).toFixed(2), // Obligatorio con 2 decimales
+        currency: 'PEN', // Obligatorio
+        orderNumber: randomOrderNumber, // <--- Usamos la variable constante aquí
+        antifraud: {
+          clientIp: '127.0.0.1',
+          merchantDefineData: { MDD4: 'test@supergiros.com', MDD32: formData.dniRemitente }
+        }
+      };
+
+      const sessionRes = await fetch(`/niubiz-api/api.ecommerce/v2/ecommerce/token/session/${merchantId}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': securityToken,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(sessionPayload)
+      });
+
+      if (!sessionRes.ok) throw new Error('No se pudo crear la sesión de pago con Niubiz.');
+      const sessionData = await sessionRes.json();
+      const sessionKey = sessionData.sessionKey;
+
+      // 3. Cargar e Inyectar el Formulario Visanet
+      const script = document.createElement('script');
+      script.src = 'https://static-qa.niubiz.com.pe/pay-form/v2/js/step1.js';
+      script.async = true;
+      script.onload = () => {
+        window.VisanetCheckout.configure({
+          sessiontoken: sessionKey,
+          channel: 'web',
+          merchantid: merchantId,
+          purchasenumber: randomOrderNumber, // <--- Usamos la misma variable aquí
+          amount: parseFloat(montoFinal).toFixed(2),
+          expirationminutes: '20',
+          timeouturl: window.location.href, 
+          merchantlogo: 'https://tu-dominio.com/logo-supergiros.png', 
+          formbuttoncolor: '#2563eb',
+          action: window.location.href, 
+          complete: async function(params) {
+            console.log('Pago de Niubiz completado:', params);
+            // Capturamos el número de operación de Niubiz y lo mandamos al backend
+            const numOperacion = params.dataMap?.TRACE_NUMBER || 'OK';
+            await executeBackendTransaction(numOperacion);
+            setIsLoading(false);
+          }
+        });
+        
+        window.VisanetCheckout.open();
+        // Cerramos el modal local porque Niubiz abrirá el suyo encima
+        setIsModalOpen(false); 
+      };
+      
+      document.body.appendChild(script);
+
+    } catch (error) {
+      console.error(error);
       setIsLoading(false);
+      Swal.fire({
+        icon: 'error',
+        title: 'Error de Pasarela',
+        text: error.message,
+        confirmButtonColor: '#ef4444'
+      });
+    }
+  };
+
+  // ------------------------------------------------------------------
+  // ORQUESTADOR DE CONFIRMACIÓN
+  // ------------------------------------------------------------------
+  const handleFinalConfirm = async () => {
+    const montoCalculado = parseFloat(total.toFixed(2));
+
+    if (paymentMethod === 'card') {
+      // Flujo Niubiz (Frontend) -> Pasa el monto calculado -> Luego Backend
+      await processNiubizPayment(montoCalculado);
+    } else {
+      // Flujo Directo Efectivo/Telegram -> Backend Inmediato
+      setIsLoading(true);
+      await executeBackendTransaction();
+      setIsLoading(false);
+      setIsModalOpen(false);
     }
   };
 
@@ -140,7 +256,6 @@ export const TransactionForm = () => {
     navigate('/');
   };
 
-  // Helper para el nombre del canal de pago
   const getPaymentChannelName = () => {
     if (paymentMethod === 'telegram') return 'n8n ➔ Telegram';
     if (paymentMethod === 'card') return 'Niubiz ➔ Card';
@@ -219,7 +334,6 @@ export const TransactionForm = () => {
         </header>
 
         <div className="flex-1 overflow-y-auto p-10 pb-32">
-          {/* Aquí está la magia de la vista */}
           {vistaActual === 'emision' ? (
             <form onSubmit={openConfirmationFlow} className="max-w-6xl mx-auto space-y-8">
               
@@ -348,7 +462,6 @@ export const TransactionForm = () => {
                 <p className="text-sm text-slate-500 font-medium mb-2">¿Cómo desea procesar el pago de este giro?</p>
                 
                 <div className="grid grid-cols-1 gap-3">
-                  {/* Opción Efectivo (NUEVO) */}
                   <div 
                     onClick={() => setPaymentMethod('cash')}
                     className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex items-center justify-between group ${paymentMethod === 'cash' ? 'border-emerald-500 bg-emerald-50/40 shadow-md shadow-emerald-500/5' : 'border-slate-200 hover:border-slate-300 bg-white'}`}
@@ -367,7 +480,6 @@ export const TransactionForm = () => {
                     </div>
                   </div>
 
-                  {/* Opción Tarjeta */}
                   <div 
                     onClick={() => setPaymentMethod('card')}
                     className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex items-center justify-between group ${paymentMethod === 'card' ? 'border-blue-500 bg-blue-50/40 shadow-md shadow-blue-500/5' : 'border-slate-200 hover:border-slate-300 bg-white'}`}
@@ -386,7 +498,6 @@ export const TransactionForm = () => {
                     </div>
                   </div>
 
-                  {/* Opción Telegram */}
                   <div 
                     onClick={() => setPaymentMethod('telegram')}
                     className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex items-center justify-between group ${paymentMethod === 'telegram' ? 'border-blue-500 bg-blue-50/40 shadow-md shadow-blue-500/5' : 'border-slate-200 hover:border-slate-300 bg-white'}`}
@@ -437,7 +548,6 @@ export const TransactionForm = () => {
                     </span>
                   </div>
                   
-                  {/* DESGLOSE MATEMÁTICO CORREGIDO */}
                   <div className="pt-2">
                     <div className="flex justify-between mb-1">
                       <span className="text-slate-500 font-medium">Importe del Giro:</span>
@@ -456,7 +566,11 @@ export const TransactionForm = () => {
 
                 <div className="text-center space-y-2 py-1">
                   <p className="text-base font-extrabold text-slate-800">¿Está seguro de la operación?</p>
-                  <p className="text-xs text-slate-400">Esta acción inyectará la entidad inmediatamente en el clúster local.</p>
+                  <p className="text-xs text-slate-400">
+                    {paymentMethod === 'card' 
+                      ? 'Se abrirá la pasarela de Niubiz para procesar el cargo.' 
+                      : 'Esta acción inyectará la entidad inmediatamente en el clúster local.'}
+                  </p>
                 </div>
 
                 <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-4">

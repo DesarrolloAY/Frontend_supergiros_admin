@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+// eslint-disable-next-line no-unused-vars
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
 
@@ -25,7 +26,7 @@ export const LoginView = () => {
 
     try {
       // 1. Llamamos a tu controlador REST en C#
-      const response = await fetch('http://localhost:5220/api/auth/login', {
+      const response = await fetch('http://127.0.0.1:60558/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ Username: dni, Password: password })
@@ -45,7 +46,7 @@ export const LoginView = () => {
       } else {
         Swal.fire({ icon: 'error', title: 'Acceso Denegado', text: data.message });
       }
-    } catch (error) {
+    } catch{
       Swal.fire({ icon: 'error', title: 'Error de Red', text: 'No se pudo conectar con el servidor de autenticación.' });
     }
   };

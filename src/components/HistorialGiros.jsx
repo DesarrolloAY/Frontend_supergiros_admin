@@ -1,6 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { executeGrpcCall, transactionClient } from '../services/grpcClient';
 import "../Protos/Transaction_pb.js"; // Asegúrate de que la ruta sea correcta
+// IMPORTANTE: Asegurar que los tipos comunes también se carguen en el scope
+import "../Protos/Common_pb.js"; 
+import "../Protos/Transaction_pb.js";
 const TransactionPb = window.proto.Protos || window.proto;
 
 export default function HistorialGiros() {
@@ -11,40 +14,43 @@ export default function HistorialGiros() {
   const [busqueda, setBusqueda] = useState('');
   const [filtroEstado, setFiltroEstado] = useState('Todos');
 
-  // Esto se ejecuta automáticamente al abrir la pestaña del historial
+  
+  // Todo el flujo de carga encapsulado dentro del Effect (La forma recomendada en React)
   useEffect(() => {
-    cargarDatos();
-  }, []);
-
-  const cargarDatos = async () => {
-    setCargando(true);
-    setErrorAcceso(null);
-    try {
-      const request = new TransactionPb.GetAllTransactionRequest();
-      const response = await executeGrpcCall(transactionClient.getAllTransaction, request);
+    const cargarDatos = async () => {
+      setCargando(true);
+      setErrorAcceso(null);
       
-      // Mapeamos los datos de Protobuf a un objeto fácil para tu tabla
-      if (response.dataList && response.dataList.length > 0) {
-        const datosMapeados = response.dataList.map(item => ({
-          id: `SG-${item.id}`,
-          remitente: item.accountid, // Aquí el ID de cuenta de C#
-          destinatario: "N/A",       // Si C# no devuelve destinatario, pon un default
-          monto: item.monto,
-          destino: item.sede,
-          estado: item.state === 1 ? "Cobrado" : "Pendiente", // Ajusta según tu lógica C#
-          fecha: new Date(item.fecharealizacion.seconds * 1000).toLocaleDateString()
-        }));
-        setGirosReales(datosMapeados);
-      } else {
-        setGirosReales([]);
+      try {
+        const request = new TransactionPb.GetAllTransactionRequest();
+        const response = await executeGrpcCall(transactionClient.getAllTransaction, request);
+        
+        // Mapeamos los datos de Protobuf a un objeto fácil para tu tabla
+        if (response.dataList && response.dataList.length > 0) {
+          const datosMapeados = response.dataList.map(item => ({
+            id: `SG-${item.id}`,
+            remitente: item.accountid,
+            destinatario: "N/A",
+            monto: item.monto,
+            destino: item.sede,
+            estado: item.state === 1 ? "Cobrado" : "Pendiente",
+            fecha: new Date(item.fecharealizacion.seconds * 1000).toLocaleDateString()
+          }));
+          setGirosReales(datosMapeados);
+        } else {
+          setGirosReales([]);
+        }
+      } catch (error) {
+        console.error("Error al cargar historial:", error);
+        setErrorAcceso("No tienes permisos suficientes para ver el historial o hubo un error de red.");
+      } finally {
+        setCargando(false);
       }
-    } catch (error) {
-      console.error("Error al cargar historial:", error);
-      setErrorAcceso("No tienes permisos suficientes para ver el historial o hubo un error de red.");
-    } finally {
-      setCargando(false);
-    }
-  };
+    };
+
+    // Llamamos a la función asíncrona justo después de definirla
+    cargarDatos();
+  }, []); // El array vacío asegura que esto solo pase 1 vez al cargar la vista
 
   // Lógica de filtrado en tiempo real (ahora usando girosReales)
   const girosFiltrados = girosReales.filter(giro => {
