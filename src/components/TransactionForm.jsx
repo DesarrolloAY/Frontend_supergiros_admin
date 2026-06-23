@@ -192,11 +192,43 @@ export const TransactionForm = () => {
         
         try {
           if (window.VisanetCheckout) {
+            
+            // 📡 EL RADAR: Escuchamos directamente al iframe por si el SDK se congela
+            // 📡 EL RADAR DEFINITIVO: Cazador de Éxitos
+            window.addEventListener('message', async (event) => {
+              if (!event.data) return;
+              
+              try {
+                // Convertimos el mensaje crudo (string) en un objeto JavaScript
+                const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+                
+                // Si el iframe grita "complete", ¡entramos en acción!
+                if (data.method === 'complete' && data.args && data.args.length > 0) {
+                  console.log("⚡ ¡ÉXITO DETECTADO POR EL RADAR!", data);
+                  
+                  // Extraemos el código de operación real de Visa
+                  const transactionToken = data.args[0].token || 'OK_RADAR';
+                  
+                  // 1. Destruimos el iframe de Visa congelado a la fuerza
+                  const visanetOverlay = document.getElementById('visanetCheckout');
+                  if (visanetOverlay) visanetOverlay.style.display = 'none';
+                  
+                  // 2. Limpiamos el estado de carga
+                  setIsLoading(false);
+                  
+                  // 3. ¡Disparamos tu backend para guardar el giro!
+                  await executeBackendTransaction(transactionToken);
+                }
+              } catch{
+                // Ignoramos la basura o mensajes de extensiones del navegador que no sean JSON
+              }
+            });
+
             window.VisanetCheckout.configure({
               sessiontoken: sessionData.sessionKey,
               merchantid: merchantId,
               purchasenumber: randomOrderNumber,
-              amount: amountFloat,
+              amount: amountFloat, 
               channel: 'web',
               action: 'javascript:void(0);', 
               timeouturl: window.location.origin, 
@@ -204,7 +236,7 @@ export const TransactionForm = () => {
               formbuttoncolor: '#2563eb',
               
               complete: async function(params) {
-                console.log('🎉 PAGO COMPLETADO. Params:', params);
+                console.log('🎉 PAGO COMPLETADO (Vía Callback). Params:', params);
                 const numOperacion = params.dataMap?.TRACE_NUMBER || 'OK';
                 await executeBackendTransaction(numOperacion);
                 setIsLoading(false);
@@ -212,7 +244,6 @@ export const TransactionForm = () => {
               error: function(err) {
                 console.error("❌ ERROR DEL MODAL VISA:", err);
                 setIsLoading(false);
-                Swal.fire({ icon: 'error', title: 'Error de SDK', text: 'La pasarela falló internamente.' });
               }
             });
 
