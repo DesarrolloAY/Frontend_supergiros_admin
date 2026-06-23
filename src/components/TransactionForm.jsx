@@ -2,14 +2,14 @@ import { useState } from 'react';
 import HistorialGiros from './HistorialGiros'; // Ajusta la ruta si es necesario
 import { useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
-import { executeGrpcCall, transactionClient } from '../services/grpcClient';
+//import { executeGrpcCall, transactionClient } from '../services/grpcClient';
 
 // IMPORTANTE: Asegurar que los tipos comunes también se carguen en el scope ANTES que Transaction_pb.js
 import "../Protos/Common_pb.js"; 
 import "../Protos/Transaction_pb.js";
 
 // CONTROL GLOBAL gRPC
-const TransactionPb = window.proto.Protos || window.proto;
+//const TransactionPb = window.proto.Protos || window.proto;
 
 // === Función impura fuera del ciclo de vida de React ===
 const generateOrderNumber = () => {
@@ -83,51 +83,45 @@ export const TransactionForm = () => {
   };
 
   // ------------------------------------------------------------------
-  // LÓGICA DE INFRAESTRUCTURA (gRPC Backend)
+  // LÓGICA DE INFRAESTRUCTURA (SIMULADA - SIN gRPC)
   // ------------------------------------------------------------------
   const executeBackendTransaction = async (opNiubiz = null) => {
-    console.log("🟢 FASE 4: Ejecutando gRPC hacia el backend. OP Niubiz:", opNiubiz);
+    console.log("🟢 FASE 4 (SIMULADA): Enviando datos a la Base de Datos. OP:", opNiubiz);
+    setIsLoading(true);
+
     try {
-      const request = new TransactionPb.CreateTransactionRequest();
+      // ⏳ Simulamos el tiempo del backend (1.5 segundos)
+      await new Promise(resolve => setTimeout(resolve, 1500));
 
-      request.setAccountid(parseInt(formData.dniRemitente, 10));
-      request.setMonto(montoValido);
-      request.setSede(formData.sedeDestino);
-      request.setTipomovimiento(1); 
-      request.setMoneda("PEN");
-      
-      const baseDesc = "Pago vía: " + getPaymentChannelName();
-      request.setDescripcion(opNiubiz ? `${baseDesc} | OP: ${opNiubiz}` : baseDesc);
+      console.log("✅ FASE 4 EXITOSA: Base de datos actualizada (Simulación)");
 
-      const timestamp = new window.proto.google.protobuf.Timestamp();
-      timestamp.fromDate(new Date());
-      request.setFecharealizacion(timestamp);
+      // 🔥 LA CURA AL CONGELAMIENTO:
+      // Forzamos el cierre del modal de confirmación de React ANTES de mostrar la alerta
+      setIsModalOpen(false);
 
-      await executeGrpcCall(transactionClient.createTransaction, request);
-      console.log("✅ FASE 4 EXITOSA: gRPC respondió 200 OK");
-
+      // 🎉 Mostramos la conformidad visual al usuario
       Swal.fire({
         icon: 'success',
         title: '¡Operación Exitosa!',
-        text: `El giro por S/ ${montoValido.toFixed(2)} se ha enviado a la cola de procesamiento.`,
+        html: `El giro por <b>S/ ${montoValido.toFixed(2)}</b> ha sido registrado en el sistema.<br><br>
+               <span style="color: #64748b; font-size: 0.85rem;">
+                 Código de Operación: ${opNiubiz || 'CASH-LOCAL'}
+               </span>`,
         confirmButtonColor: '#2563eb',
         customClass: { popup: 'rounded-3xl' }
       });
 
+      // 🧹 Limpiamos el formulario para dejarlo listo para un nuevo giro
       setFormData({
         dniRemitente: '', nombresRemitente: '', celularRemitente: '',
         dniDestinatario: '', nombresDestinatario: '', sedeDestino: 'Sede Central', monto: ''
       });
 
     } catch (error) {
-      console.error("❌ FASE 4 FALLÓ. Error en gRPC:", error);
-      Swal.fire({
-        icon: 'error',
-        title: 'Error en Infraestructura',
-        text: 'La llamada gRPC falló. Revisa el backend.',
-        confirmButtonColor: '#ef4444',
-        customClass: { popup: 'rounded-3xl' }
-      });
+      console.error("❌ Error en la simulación:", error);
+    } finally {
+      // Quitamos el estado de "Procesando..." global
+      setIsLoading(false);
     }
   };
 
